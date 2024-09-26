@@ -1,5 +1,5 @@
-rm -rf ip/liaoning.onlygood.ip
-city="liaoning"
+rm -rf ip/shijiazhuang.onlygood.ip
+city="shijiazhuang"
 # 使用城市名作为默认文件名，格式为 CityName.ip
 ipfile="ip/${city}.ip"
 only_good_ip="ip/${city}.onlygood.ip"
@@ -61,5 +61,5 @@ rm -rf tmp1.txt tmp2.txt tmp3.txt
 rm -rf gdgd_fofa.txt
 #--------------------合并所有城市的txt文件为:   zubo_fofa.txt-----------------------------------------
 echo "📡  电信频道,#genre#" >>gdtv_fofa.txt
-cat txt/fofa_liaoning.txt >>lntv_fofa.txt
+cat txt/fofa_shijiazhuang.txt >>lntv_fofa.txt
 for a in result/*.txt; do echo "";echo "========================= $(basename "$a") ==================================="; cat $a; done
