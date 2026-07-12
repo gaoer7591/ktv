@@ -23,7 +23,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests[socks] futures
 
-    - name: 自动搜寻、测速并保留最快3套河北电信组播
+    - name: 自动搜寻、测速并保留最快1套河北电信组播
       run: |
         python -c '
         import re
@@ -59,7 +59,7 @@ jobs:
             if b_ip not in all_ips:
                 all_ips.append(b_ip)
 
-        # ==================== 2. 高并发测速，筛选响应速度最快的前 3 套 IP ====================
+        # ==================== 2. 高并发测速，筛选响应速度最快的冠军 IP ====================
         print(f"共发现 {len(all_ips)} 个中转服务器，开始进行延迟测速评分...")
         rated_ips = []
         
@@ -68,14 +68,14 @@ jobs:
             test_url = f"{ip_prefix}/rtp/239.254.200.45:8008"
             try:
                 start_time = time.time()
-                # stream=True 只要建立连接、拿到响应头即代表通畅，极速测速
+                # stream=True 极速建立连接获取响应头即完成测速
                 r = requests.get(test_url, stream=True, timeout=1.5)
                 if r.status_code == 200:
                     delay = time.time() - start_time
                     return (ip_prefix, delay)
             except:
                 pass
-            return (ip_prefix, 999.0) # 失败或超时打最低分
+            return (ip_prefix, 999.0)
 
         with ThreadPoolExecutor(max_workers=20) as executor:
             results = executor.map(test_ip_speed, all_ips)
@@ -85,23 +85,20 @@ jobs:
         # 按照延迟从小到大（从快到慢）排序
         rated_ips.sort(key=lambda x: x[1])
         
-        # 筛选出最快的前 3 套 IP 前缀
-        fast_top3_ips = []
-        print("\n===== 测速排行榜 (前3名将被录用) =====")
-        count = 0
+        # 筛选出最快的那一套冠军 IP
+        best_ip = None
+        print("\n===== 测速排行榜 =====")
         for ip, delay in rated_ips:
-            if delay < 999.0 and count < 3:
-                print(f"第 {count+1} 名: {ip} | 延迟: {delay:.3f} 秒")
-                fast_top3_ips.append(ip)
-                count += 1
+            if delay < 999.0:
+                print(f"🥇 冠军线路: {ip} | 延迟: {delay:.3f} 秒")
+                best_ip = ip
+                break
                 
-        # 极其严谨的兜底：如果Actions海外节点测国内流因网络墙全报超时，则直接录用用户的保底优质IP，确保不产出空文件
-        if len(fast_top3_ips) < 3:
-            print("部分公网节点在Actions环境下超时，正在补充保底优质中转...")
-            for b_ip in backup_ips:
-                if b_ip not in fast_top3_ips and len(fast_top3_ips) < 3:
-                    fast_top3_ips.append(b_ip)
-                    print(f"已录用保底线路: {b_ip}")
+        # 兜底机制：如果Actions海外节点测国内流全部超时，则直接采用首选保底IP，确保绝不生成空文件
+        if not best_ip:
+            print("公网节点在Actions环境下均超时，已自动采用第一保底线路...")
+            best_ip = backup_ips[0]
+            print(f"已录用保底线路: {best_ip}")
 
         # ==================== 3. 固化 233 个准确内网组播节点 ====================
         hebei_233_nodes = [
@@ -339,11 +336,10 @@ jobs:
             ("丰润电视", "/rtp/239.254.201.58:5197")
         ]
 
-        # ==================== 4. 仅用筛选出的最快 3 套 IP 组合装配输出 ====================
+        # ==================== 4. 仅配对这套唯一的极速冠军 IP ====================
         final_list = []
-        for base in fast_top3_ips:
-            for name, path in hebei_233_nodes:
-                final_list.append((name, base + path))
+        for name, path in hebei_233_nodes:
+            final_list.append((name, best_ip + path))
                 
         # 写入成品
         with open("hebei_telecom.m3u", "w", encoding="utf-8") as f:
@@ -357,7 +353,7 @@ jobs:
             for name, url in final_list:
                 f.write(f"{name},{url}\n")
                 
-        print(f"\n🎉 完美收工！已选定全网响应最快的前 3 套中转IP，成功生成了 {len(fast_top3_ips)}x233 共 {len(final_list)} 条精简直播源！")
+        print(f"\n🎉 完美收工！最终选定唯一的冠军 IP，成功生成了绝对纯净的 233 条极致直播源！")
         '
 
     - name: 自动把新文件提交存回仓库
@@ -365,5 +361,5 @@ jobs:
         git config --global user.name "actions-user"
         git config --global user.email "action@github.com"
         git add .
-        git commit -m "深度测速：仅保留全网响应速度最快的前3套IP组合" || exit 0
+        git commit -m "深度测速：仅保留唯一的全网最快冠军IP前缀" || exit 0
         git push
