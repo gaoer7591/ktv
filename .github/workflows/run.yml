@@ -111,4 +111,51 @@ jobs:
         git config --global user.email "action@github.com"
         git add .
         git commit -m "自动更新河北电信组播源(M3U和TXT)" || exit 0
+        git push                        # 如果原本的文件已经是 TXT 格式 (例如 频道名,http://...)
+                        elif "," in line and not line.startswith("#"):
+                            parts = line.split(",")
+                            if len(parts) >= 2:
+                                c_name = parts[0].strip()
+                                c_url = parts[1].strip()
+                                if c_url.startswith("http") or c_url.startswith("rtp"):
+                                    hebei_txt_lines.append(f"{c_name},{c_url}\n")
+                                    hebei_m3u_lines.append(f"#EXTINF:-1,{c_name}\n")
+                                    hebei_m3u_lines.append(f"{c_url}\n")
+        
+        # 去重处理
+        final_m3u = []
+        seen_urls = set()
+        for i in range(0, len(hebei_m3u_lines), 2):
+            if i+1 < len(hebei_m3u_lines):
+                inf = hebei_m3u_lines[i]
+                url = hebei_m3u_lines[i+1]
+                if url not in seen_urls:
+                    seen_urls.add(url)
+                    final_m3u.extend([inf, url])
+        
+        final_txt = list(set(hebei_txt_lines))
+        
+        # 1. 写入 hebei_telecom.m3u
+        if final_m3u:
+            with open("hebei_telecom.m3u", "w", encoding="utf-8") as f:
+                f.write("#EXTM3U\n")
+                f.writelines(final_m3u)
+            print("成功生成 hebei_telecom.m3u 文件！")
+            
+        # 2. 写入 hebei_telecom.txt
+        if final_txt:
+            with open("hebei_telecom.txt", "w", encoding="utf-8") as f:
+                f.writelines(final_txt)
+            print("成功生成 hebei_telecom.txt 文件！")
+            
+        if not final_m3u and not final_txt:
+            print("本次扫描未过滤到符合条件的河北电信组播源。")
+        '
+
+    - name: 自动把新文件提交存回仓库
+      run: |
+        git config --global user.name "actions-user"
+        git config --global user.email "action@github.com"
+        git add .
+        git commit -m "自动更新河北电信组播源(M3U和TXT)" || exit 0
         git push
