@@ -1,4 +1,4 @@
-name: 自动扫描并测速直播源
+name: 360测绘扫描并测速直播源
 
 on:
   workflow_dispatch:
@@ -23,25 +23,60 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests[socks] futures
 
-    - name: 自动搜寻、测速并保留最快1套河北电信组播
+    - name: 从360测绘捞取并筛选最快3套河北电信中转
+      env:
+        QUAKE_TOKEN: ${{ secrets.QUAKE_TOKEN }}
       run: |
         python -c '
+        import os
         import re
         import time
+        import json
         import requests
         from concurrent.futures import ThreadPoolExecutor
         
-        # ==================== 1. 全网搜寻潜在的河北电信中转 IP ====================
-        print("开始搜寻全网动态中转 IP 前缀...")
+        quake_token = os.getenv("QUAKE_TOKEN", "").strip()
         discovered_ips = set()
         
+        # ==================== 1. 从 360 Quake 测绘平台检索 200 个节点 ====================
+        if quake_token:
+            print("正在连接 360 Quake 测绘平台检索河北电信节点...")
+            headers = {
+                "X-QuakeToken": quake_token,
+                "Content-Type": "application/json"
+            }
+            # 搜索语法：限定河北电信且包含组播特征
+            data = {
+                "query": "response:\"/rtp/239.254.\" AND isp:\"China Telecom\" AND org:\"Chinatelecom Hebei\"",
+                "start": 0,
+                "size": 200,
+                "latest": True
+            }
+            try:
+                response = requests.post("https://quake.360.net/api/v3/search/quake_service", headers=headers, json=data, timeout=15)
+                if response.status_code == 200:
+                    res_json = response.json()
+                    data_list = res_json.get("data", [])
+                    print(f"360 测绘成功返回 {len(data_list)} 个服务节点，开始提取 IP 前缀...")
+                    for item in data_list:
+                        ip = item.get("ip", "")
+                        port = item.get("port", "")
+                        if ip and port:
+                            # 拼接成标准中转格式
+                            discovered_ips.add(f"http://{ip}:{port}")
+                else:
+                    print(f"360 Quake 接口返回错误码: {response.status_code}，将启用开源列表作为备用数据源。")
+            except Exception as e:
+                print(f"请求 360 Quake 发生异常: {e}，将启用开源列表作为备用数据源。")
+        else:
+            print("⚠️ 未配置 QUAKE_TOKEN 环境变量，已自动切换到公网开源打捞模式。")
+
+        # ==================== 2. 公网开源与保底节点融合 ====================
         ip_sources = [
             "https://raw.githubusercontent.com/ssili126/tv/main/itvlist.txt",
             "https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/ipv6.m3u",
             "https://raw.githubusercontent.com/YueChan/Live/main/APTV.m3u"
         ]
-        
-        # 用户的优质保底 IP
         backup_ips = ["http://www.160606.xyz:10010", "http://106.116.243.138:9999"]
         
         for url in ip_sources:
@@ -59,8 +94,8 @@ jobs:
             if b_ip not in all_ips:
                 all_ips.append(b_ip)
 
-        # ==================== 2. 高并发测速，筛选响应速度最快的冠军 IP ====================
-        print(f"共发现 {len(all_ips)} 个中转服务器，开始进行延迟测速评分...")
+        # ==================== 3. 高并发测速，筛选响应速度最快的前 3 套 IP ====================
+        print(f"\n汇总池共包含 {len(all_ips)} 个有效中转服务器，开始进行延迟测速评分...")
         rated_ips = []
         
         def test_ip_speed(ip_prefix):
@@ -77,30 +112,33 @@ jobs:
                 pass
             return (ip_prefix, 999.0)
 
-        with ThreadPoolExecutor(max_workers=20) as executor:
+        with ThreadPoolExecutor(max_workers=25) as executor:
             results = executor.map(test_ip_speed, all_ips)
             for ip_prefix, delay in results:
                 rated_ips.append((ip_prefix, delay))
         
-        # 按照延迟从小到大（从快到慢）排序
+        # 按照延迟从小到大排序
         rated_ips.sort(key=lambda x: x[1])
         
-        # 筛选出最快的那一套冠军 IP
-        best_ip = None
-        print("\n===== 测速排行榜 =====")
+        # 筛选出最快的前 3 套 IP 前缀
+        fast_top3_ips = []
+        print("\n===== 🏁 测速排行榜 (前3名将被录用) =====")
+        count = 0
         for ip, delay in rated_ips:
-            if delay < 999.0:
-                print(f"🥇 冠军线路: {ip} | 延迟: {delay:.3f} 秒")
-                best_ip = ip
-                break
+            if delay < 999.0 and count < 3:
+                print(f"第 {count+1} 名: {ip} | 延迟: {delay:.3f} 秒")
+                fast_top3_ips.append(ip)
+                count += 1
                 
-        # 兜底机制：如果Actions海外节点测国内流全部超时，则直接采用首选保底IP，确保绝不生成空文件
-        if not best_ip:
-            print("公网节点在Actions环境下均超时，已自动采用第一保底线路...")
-            best_ip = backup_ips[0]
-            print(f"已录用保底线路: {best_ip}")
+        # 兜底机制：如果海外Actions节点检测国内流全报超时，则把最稳的保底中转顶上
+        if len(fast_top3_ips) < 3:
+            print("部分节点在 Actions 环境下超时，正在补充保底优质中转...")
+            for b_ip in backup_ips:
+                if b_ip not in fast_top3_ips and len(fast_top3_ips) < 3:
+                    fast_top3_ips.append(b_ip)
+                    print(f"已录用保底线路: {b_ip}")
 
-        # ==================== 3. 固化 233 个准确内网组播节点 ====================
+        # ==================== 4. 固化 233 个准确内网组播节点 ====================
         hebei_233_nodes = [
             ("九屏直播频道", "/rtp/239.254.200.248:6000"),
             ("河北卫视", "/rtp/239.254.200.174:6000"),
@@ -336,10 +374,11 @@ jobs:
             ("丰润电视", "/rtp/239.254.201.58:5197")
         ]
 
-        # ==================== 4. 仅配对这套唯一的极速冠军 IP ====================
+        # ==================== 5. 仅用筛选出的最快 3 套 IP 组合装配输出 ====================
         final_list = []
-        for name, path in hebei_233_nodes:
-            final_list.append((name, best_ip + path))
+        for base in fast_top3_ips:
+            for name, path in hebei_233_nodes:
+                final_list.append((name, base + path))
                 
         # 写入成品
         with open("hebei_telecom.m3u", "w", encoding="utf-8") as f:
@@ -353,7 +392,7 @@ jobs:
             for name, url in final_list:
                 f.write(f"{name},{url}\n")
                 
-        print(f"\n🎉 完美收工！最终选定唯一的冠军 IP，成功生成了绝对纯净的 233 条极致直播源！")
+        print(f"\n🎉 完美收工！已合并360测绘与公网池，选定延迟最低的前3名组合，成功生成了 {len(fast_top3_ips)}x233 共 {len(final_list)} 条精简直播源！")
         '
 
     - name: 自动把新文件提交存回仓库
@@ -361,5 +400,5 @@ jobs:
         git config --global user.name "actions-user"
         git config --global user.email "action@github.com"
         git add .
-        git commit -m "深度测速：仅保留唯一的全网最快冠军IP前缀" || exit 0
+        git commit -m "360测绘深度扫描：仅保留全网响应最快的前3套IP组合" || exit 0
         git push
