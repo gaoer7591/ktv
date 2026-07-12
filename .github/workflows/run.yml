@@ -23,20 +23,16 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests[socks] futures
 
-    - name: 执行基础抓取脚本
-      run: |
-        python itv_all.py || python a.py || echo "基础流程跑完"
-
-    - name: 深度封装233个真实频道并自动动态更新中转IP
+    - name: 自动搜寻、测速并保留最快3套河北电信组播
       run: |
         python -c '
-        import os
         import re
+        import time
         import requests
         from concurrent.futures import ThreadPoolExecutor
         
-        # ==================== 1. 自动寻找当前网络中活跃的河北电信中转 IP ====================
-        print("开始全网实时打捞最新的河北电信中转服务器IP...")
+        # ==================== 1. 全网搜寻潜在的河北电信中转 IP ====================
+        print("开始搜寻全网动态中转 IP 前缀...")
         discovered_ips = set()
         
         ip_sources = [
@@ -45,8 +41,8 @@ jobs:
             "https://raw.githubusercontent.com/YueChan/Live/main/APTV.m3u"
         ]
         
-        # 默认的稳定中转做基础兜底
-        backup_ips = ["www.160606.xyz:10010", "106.116.243.138:9999"]
+        # 用户的优质保底 IP
+        backup_ips = ["http://www.160606.xyz:10010", "http://106.116.243.138:9999"]
         
         for url in ip_sources:
             try:
@@ -58,14 +54,56 @@ jobs:
             except:
                 pass
                 
-        base_urls = list(discovered_ips)
+        all_ips = list(discovered_ips)
         for b_ip in backup_ips:
-            full_b_ip = f"http://{b_ip}"
-            if full_b_ip not in base_urls:
-                base_urls.append(full_b_ip)
-        print(f"当前全网共成功捕获到 {len(base_urls)} 个动态中转服务器前缀。")
+            if b_ip not in all_ips:
+                all_ips.append(b_ip)
 
-        # ==================== 2. 注入您提供的 233 个绝对准确的内网组播ID与独立端口 ====================
+        # ==================== 2. 高并发测速，筛选响应速度最快的前 3 套 IP ====================
+        print(f"共发现 {len(all_ips)} 个中转服务器，开始进行延迟测速评分...")
+        rated_ips = []
+        
+        def test_ip_speed(ip_prefix):
+            # 使用 CCTV-1 作为测速探测锚点
+            test_url = f"{ip_prefix}/rtp/239.254.200.45:8008"
+            try:
+                start_time = time.time()
+                # stream=True 只要建立连接、拿到响应头即代表通畅，极速测速
+                r = requests.get(test_url, stream=True, timeout=1.5)
+                if r.status_code == 200:
+                    delay = time.time() - start_time
+                    return (ip_prefix, delay)
+            except:
+                pass
+            return (ip_prefix, 999.0) # 失败或超时打最低分
+
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            results = executor.map(test_ip_speed, all_ips)
+            for ip_prefix, delay in results:
+                rated_ips.append((ip_prefix, delay))
+        
+        # 按照延迟从小到大（从快到慢）排序
+        rated_ips.sort(key=lambda x: x[1])
+        
+        # 筛选出最快的前 3 套 IP 前缀
+        fast_top3_ips = []
+        print("\n===== 测速排行榜 (前3名将被录用) =====")
+        count = 0
+        for ip, delay in rated_ips:
+            if delay < 999.0 and count < 3:
+                print(f"第 {count+1} 名: {ip} | 延迟: {delay:.3f} 秒")
+                fast_top3_ips.append(ip)
+                count += 1
+                
+        # 极其严谨的兜底：如果Actions海外节点测国内流因网络墙全报超时，则直接录用用户的保底优质IP，确保不产出空文件
+        if len(fast_top3_ips) < 3:
+            print("部分公网节点在Actions环境下超时，正在补充保底优质中转...")
+            for b_ip in backup_ips:
+                if b_ip not in fast_top3_ips and len(fast_top3_ips) < 3:
+                    fast_top3_ips.append(b_ip)
+                    print(f"已录用保底线路: {b_ip}")
+
+        # ==================== 3. 固化 233 个准确内网组播节点 ====================
         hebei_233_nodes = [
             ("九屏直播频道", "/rtp/239.254.200.248:6000"),
             ("河北卫视", "/rtp/239.254.200.174:6000"),
@@ -76,6 +114,7 @@ jobs:
             ("河北文旅公共", "/rtp/239.254.200.22:6000"),
             ("河北农民", "/rtp/239.254.200.23:6000"),
             ("睛彩河北", "/rtp/239.254.200.27:6000"),
+            ("河北杂技频道", "/rtp/239.254.201.139:7203"),
             ("河北三佳购物", "/rtp/239.254.200.143:6000"),
             ("CCTV-1综合", "/rtp/239.254.200.45:8008"),
             ("CCTV-2财经", "/rtp/239.254.200.158:6000"),
@@ -292,7 +331,7 @@ jobs:
             ("南和电视", "/rtp/239.254.201.72:6000"),
             ("临漳电视台", "/rtp/239.254.201.73:5221"),
             ("内丘电视台", "/rtp/239.254.201.77:5380"),
-            ("迁安电视", "/rtp/239.254.201.109:5199"),
+            ("遷安电视", "/rtp/239.254.201.109:5199"),
             ("馆陶电视", "/rtp/239.254.201.106:5224"),
             ("乐亭电视", "/rtp/239.254.201.107:5200"),
             ("沙河电视", "/rtp/239.254.200.181:5369"),
@@ -300,27 +339,25 @@ jobs:
             ("丰润电视", "/rtp/239.254.201.58:5197")
         ]
 
-        # ==================== 3. 排列组合并多线程生成完整的最终列表 ====================
-        final_valid_sources = []
-        
-        # 将最新的所有可用 IP 前缀依次配对 233 个绝对正确的后缀
-        for base in base_urls:
+        # ==================== 4. 仅用筛选出的最快 3 套 IP 组合装配输出 ====================
+        final_list = []
+        for base in fast_top3_ips:
             for name, path in hebei_233_nodes:
-                final_valid_sources.append((name, base + path))
-
-        # ==================== 4. 分别保存为标准的 .m3u 与 .txt 格式 ====================
+                final_list.append((name, base + path))
+                
+        # 写入成品
         with open("hebei_telecom.m3u", "w", encoding="utf-8") as f:
             f.write("#EXTM3U\n")
             f.write("## 河北电信,#genre#\n")
-            for name, url in final_valid_sources:
+            for name, url in final_list:
                 f.write(f"#EXTINF:-1,{name}\n{url}\n")
                 
         with open("hebei_telecom.txt", "w", encoding="utf-8") as f:
             f.write("河北电信,#genre#\n")
-            for name, url in final_valid_sources:
+            for name, url in final_list:
                 f.write(f"{name},{url}\n")
                 
-        print(f"🎉 完美收工！已将 232 个独立变频端口全部配对动态 IP，并成功输出到直播源文件中。")
+        print(f"\n🎉 完美收工！已选定全网响应最快的前 3 套中转IP，成功生成了 {len(fast_top3_ips)}x233 共 {len(final_list)} 条精简直播源！")
         '
 
     - name: 自动把新文件提交存回仓库
@@ -328,5 +365,5 @@ jobs:
         git config --global user.name "actions-user"
         git config --global user.email "action@github.com"
         git add .
-        git commit -m "完全固化 232 个真实内网映射并接入自动更新 IP 逻辑" || exit 0
+        git commit -m "深度测速：仅保留全网响应速度最快的前3套IP组合" || exit 0
         git push
