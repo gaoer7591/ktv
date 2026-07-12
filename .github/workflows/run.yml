@@ -1,0 +1,37 @@
+name: 自动扫描并测速直播源
+
+on:
+  # 1. 允许你在网页上点击按钮手动运行
+  workflow_dispatch:
+  # 2. 每天晚上 22:00 自动运行一次（可以根据需要修改）
+  schedule:
+    - cron: '0 14 * * *'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 检查并下载仓库代码
+      uses: actions/checkout@v3
+
+    - name: 配置 Python 环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: 安装基础依赖
+      run: |
+        pip install requests
+
+    - name: 执行抓取与合并脚本
+      run: |
+        python itv_all.py || python a.py
+
+    - name: 自动把测速生成的新文件提交存回仓库
+      run: |
+        git config --global user.name "actions-user"
+        git config --global user.email "action@github.com"
+        git add .
+        git commit -m "自动更新直播源成功" || exit 0
+        git push
