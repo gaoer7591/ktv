@@ -1,9 +1,7 @@
 name: 自动扫描并测速直播源
 
 on:
-  # 1. 允许你在网页上点击按钮手动运行
   workflow_dispatch:
-  # 2. 每天晚上 22:00 自动运行一次（可以根据需要修改）
   schedule:
     - cron: '0 14 * * *'
 
@@ -13,16 +11,17 @@ jobs:
 
     steps:
     - name: 检查并下载仓库代码
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: 配置 Python 环境
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
-    - name: 安装基础依赖
+    - name: 安装项目测速全部核心依赖
       run: |
-        pip install requests
+        python -m pip install --upgrade pip
+        pip install requests[socks] futures
 
     - name: 执行抓取与合并脚本
       run: |
